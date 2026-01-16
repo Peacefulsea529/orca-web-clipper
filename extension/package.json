@@ -1,0 +1,14 @@
+{
+  "name": "orca-web-clipper-extension",
+  "version": "1.0.0",
+  "description": "Browser extension for clipping web pages to Orca Note",
+  "scripts": {
+    "build": "node build.js",
+    "watch": "node build.js --watch",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "esbuild": "^0.19.0",
+    "typescript": "^5.0.0"
+  }
+}

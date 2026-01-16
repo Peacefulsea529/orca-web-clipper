@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orca Web Clipper</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <img src="../icons/icon32.png" alt="Orca" width="24" height="24">
+        <span>Orca Web Clipper</span>
+      </div>
+      <div id="connection-status" class="status status-checking">
+        <span class="status-dot"></span>
+        <span class="status-text">检查中...</span>
+      </div>
+    </header>
+    
+    <!-- Page Info -->
+    <section class="page-info">
+      <h2 id="page-title" class="page-title">加载中...</h2>
+      <p id="page-url" class="page-url"></p>
+    </section>
+    
+    <!-- Tabs -->
+    <nav class="tabs">
+      <button class="tab active" data-tab="clip">剪藏</button>
+      <button class="tab" data-tab="settings">设置</button>
+    </nav>
+    
+    <!-- Clip Tab -->
+    <div id="tab-clip" class="tab-content active">
+      <!-- Clip Mode -->
+      <section class="clip-options">
+        <label class="option-label">剪藏模式</label>
+        <div class="button-group">
+          <button id="mode-article" class="mode-btn active" data-mode="article">
+            <span class="icon">📄</span>
+            <span>文章</span>
+          </button>
+          <button id="mode-selection" class="mode-btn" data-mode="selection" disabled>
+            <span class="icon">✂️</span>
+            <span>选中</span>
+          </button>
+          <button id="mode-fullpage" class="mode-btn" data-mode="full-page">
+            <span class="icon">📃</span>
+            <span>全页</span>
+          </button>
+        </div>
+      </section>
+      
+      <!-- Target -->
+      <section class="clip-options">
+        <label class="option-label">保存位置</label>
+        <div class="button-group">
+          <button id="target-journal" class="target-btn active" data-target="journal">
+            <span class="icon">📅</span>
+            <span>今日日记</span>
+          </button>
+          <button id="target-page" class="target-btn" data-target="page">
+            <span class="icon">📝</span>
+            <span>页面</span>
+          </button>
+        </div>
+      </section>
+      
+      <!-- Page Name Input (shown when target is page) -->
+      <section id="page-name-section" class="clip-options" style="display: none;">
+        <label class="option-label">页面名称</label>
+        <input type="text" id="page-name-input" class="input" placeholder="输入页面名称（已存在则追加，否则新建）">
+        <p class="setting-hint">留空则使用网页标题作为页面名称</p>
+      </section>
+      
+      <!-- Template -->
+      <section class="clip-options">
+        <label class="option-label">模板</label>
+        <select id="template-select" class="select">
+          <option value="default">默认</option>
+          <option value="article">文章</option>
+          <option value="bookmark">书签</option>
+          <option value="research">研究笔记</option>
+        </select>
+      </section>
+      
+      <!-- Note -->
+      <section class="clip-options">
+        <label class="option-label">备注</label>
+        <textarea id="note-input" class="textarea" placeholder="添加你的笔记..." rows="3"></textarea>
+      </section>
+      
+      <!-- Screenshot feature removed - MCP payload size limit makes it impractical -->
+      
+      <!-- AI Cleaning Option -->
+      <section id="ai-option-section" class="clip-options checkbox-option" style="display: none;">
+        <label class="checkbox-label">
+          <input type="checkbox" id="use-ai-cleaning">
+          <span>🤖 AI 智能优化</span>
+        </label>
+        <p class="setting-hint" style="margin: 4px 0 0 24px; font-size: 11px;">使用 AI 移除噪音内容</p>
+      </section>
+      
+      <!-- Actions -->
+      <section class="actions">
+        <button id="clip-btn" class="clip-btn" disabled>
+          <span class="btn-text">剪藏到 Orca</span>
+          <span class="btn-loading hidden">保存中...</span>
+        </button>
+      </section>
+    </div>
+    
+    <!-- Settings Tab -->
+    <div id="tab-settings" class="tab-content">
+      <!-- MCP Settings (Primary) -->
+      <section class="clip-options">
+        <label class="option-label">MCP 直连设置 (推荐)</label>
+        <div class="setting-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="use-mcp">
+            <span>启用 MCP 直连模式</span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <span>MCP Token</span>
+          <input type="password" id="mcp-token" class="input" placeholder="从 Orca 设置中复制...">
+        </div>
+        <div class="setting-row">
+          <span>仓库 ID</span>
+          <input type="text" id="mcp-repo-id" class="input" placeholder="default (留空自动发现)">
+        </div>
+        <p class="setting-hint">在 Orca 设置 → 开发者 → MCP Server 中获取 Token</p>
+      </section>
+      
+      <!-- Legacy Settings -->
+      <section class="clip-options">
+        <label class="option-label">剪贴板模式 (备用)</label>
+        <div class="setting-row">
+          <span>服务器端口</span>
+          <input type="number" id="server-port" class="input-small" value="27183">
+        </div>
+        <div class="setting-row">
+          <span>认证令牌</span>
+          <input type="text" id="auth-token" class="input" placeholder="粘贴令牌...">
+        </div>
+      </section>
+      
+      <!-- AI Settings -->
+      <section class="clip-options">
+        <label class="option-label">🤖 AI 智能优化 (可选)</label>
+        <div class="setting-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="ai-enabled">
+            <span>启用 AI 内容优化</span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <span>AI 服务商</span>
+          <select id="ai-provider" class="select-small">
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="custom">自定义</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <span>API Key</span>
+          <input type="password" id="ai-api-key" class="input" placeholder="sk-... 或 API 密钥">
+        </div>
+        <div class="setting-row">
+          <span>模型</span>
+          <input type="text" id="ai-model" class="input" placeholder="gpt-4o-mini (留空使用默认)">
+        </div>
+        <div id="ai-custom-url-row" class="setting-row" style="display: none;">
+          <span>自定义 URL</span>
+          <input type="text" id="ai-base-url" class="input" placeholder="https://api.example.com/v1">
+        </div>
+        <div class="setting-row">
+          <span>优化模式</span>
+          <select id="ai-cleaning-mode" class="select-small">
+            <option value="extract">智能提取</option>
+            <option value="summarize">生成摘要</option>
+            <option value="enhance">增强格式</option>
+          </select>
+        </div>
+        <p class="setting-hint">AI 将在规则优化后进一步处理内容，需要 API Key</p>
+        <button id="test-ai-btn" class="clip-btn secondary" style="margin-top: 8px; font-size: 12px; padding: 6px 12px;">
+          测试 AI 连接
+        </button>
+      </section>
+      
+      <section class="clip-options">
+        <label class="option-label">默认设置</label>
+        <div class="setting-row">
+          <span>默认剪藏模式</span>
+          <select id="default-mode" class="select-small">
+            <option value="article">文章</option>
+            <option value="full-page">全页</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <span>默认保存位置</span>
+          <select id="default-target" class="select-small">
+            <option value="journal">今日日记</option>
+            <option value="new-page">新页面</option>
+          </select>
+        </div>
+      </section>
+      
+      <section class="actions">
+        <button id="save-settings-btn" class="clip-btn">
+          保存设置
+        </button>
+        <button id="test-connection-btn" class="clip-btn secondary" style="margin-top: 8px;">
+          测试连接
+        </button>
+      </section>
+    </div>
+    
+    <!-- Status Message -->
+    <div id="status-message" class="status-message hidden"></div>
+  </div>
+  
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

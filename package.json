@@ -1,0 +1,16 @@
+{
+  "name": "orca-web-clipper-plugin",
+  "version": "1.0.0",
+  "description": "Orca Web Clipper Plugin - Receives clips via Clipboard",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "esbuild src/index.tsx --bundle --outfile=dist/index.js --format=esm --external:react --external:react-dom --platform=browser --banner:js=\"const React = window.React; const ReactDOM = window.ReactDOM;\"",
+    "watch": "esbuild src/index.tsx --bundle --outfile=dist/index.js --format=esm --external:react --external:react-dom --platform=browser --banner:js=\"const React = window.React; const ReactDOM = window.ReactDOM;\" --watch"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "esbuild": "^0.19.5",
+    "typescript": "^5.2.2"
+  }
+}

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+extension/dist/
+orca-plugin/dist/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment files (may contain secrets)
+.env
+.env.local
+.env.*.local
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Temporary/debug files
+*.txt
+*.zip
+
+# Agent instructions (personal)
+AGENTS.md
