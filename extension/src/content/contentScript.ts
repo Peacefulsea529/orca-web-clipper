@@ -15,6 +15,7 @@ function formatDateTime(date: Date): string {
 
 /**
  * Extract metadata from the current page
+ * Enhanced extraction for author and published time
  */
 function extractMetadata(): Partial<ClipMetadata> {
   const metadata: Partial<ClipMetadata> = {
@@ -29,18 +30,95 @@ function extractMetadata(): Partial<ClipMetadata> {
     metadata.siteName = ogSiteName.getAttribute('content') || undefined
   }
   
-  // Try to get author
-  const authorMeta = document.querySelector('meta[name="author"]') || 
-                     document.querySelector('meta[property="article:author"]')
-  if (authorMeta) {
-    metadata.author = authorMeta.getAttribute('content') || undefined
+  // === Enhanced Author Extraction ===
+  // Priority order: meta tags -> schema.org -> visible elements
+  const authorSelectors = [
+    // Meta tags (most reliable)
+    'meta[name="author"]',
+    'meta[property="article:author"]',
+    'meta[property="og:article:author"]',
+    'meta[name="twitter:creator"]',
+    // Schema.org
+    '[itemprop="author"] [itemprop="name"]',
+    '[itemprop="author"]',
+    // Common class patterns
+    '.author-name',
+    '.author__name',
+    '.byline__name',
+    '.article-author',
+    '.post-author',
+    // WeChat specific
+    '#js_name',
+    '.rich_media_meta_nickname',
+    // Zhihu
+    '.AuthorInfo-name',
+    '.UserLink-link',
+    // Generic patterns
+    '[rel="author"]',
+    '.byline a',
+    '.author a',
+  ]
+  
+  for (const selector of authorSelectors) {
+    try {
+      const el = document.querySelector(selector)
+      if (el) {
+        const content = el.getAttribute('content') || el.textContent?.trim()
+        if (content && content.length < 100) { // Sanity check
+          metadata.author = content
+          break
+        }
+      }
+    } catch { /* skip invalid selector */ }
   }
   
-  // Try to get published date
-  const dateMeta = document.querySelector('meta[property="article:published_time"]') ||
-                   document.querySelector('meta[name="date"]')
-  if (dateMeta) {
-    metadata.publishedAt = dateMeta.getAttribute('content') || undefined
+  // === Enhanced Published Date Extraction ===
+  // Priority order: meta tags -> schema.org -> time elements -> visible text
+  const dateSelectors = [
+    // Meta tags
+    { selector: 'meta[property="article:published_time"]', attr: 'content' },
+    { selector: 'meta[name="date"]', attr: 'content' },
+    { selector: 'meta[name="pubdate"]', attr: 'content' },
+    { selector: 'meta[property="og:updated_time"]', attr: 'content' },
+    { selector: 'meta[name="DC.date.issued"]', attr: 'content' },
+    // Schema.org
+    { selector: '[itemprop="datePublished"]', attr: 'content' },
+    { selector: '[itemprop="datePublished"]', attr: 'datetime' },
+    { selector: '[itemprop="dateCreated"]', attr: 'content' },
+    // HTML5 time element
+    { selector: 'time[datetime]', attr: 'datetime' },
+    { selector: 'time[pubdate]', attr: 'datetime' },
+    { selector: 'article time', attr: 'datetime' },
+    // WeChat specific
+    { selector: '#publish_time', attr: 'textContent' },
+    // Common patterns
+    { selector: '.publish-time', attr: 'textContent' },
+    { selector: '.post-date', attr: 'textContent' },
+    { selector: '.article-date', attr: 'textContent' },
+    { selector: '.entry-date', attr: 'textContent' },
+    { selector: '.date', attr: 'textContent' },
+  ]
+  
+  for (const { selector, attr } of dateSelectors) {
+    try {
+      const el = document.querySelector(selector)
+      if (el) {
+        let dateStr: string | null = null
+        if (attr === 'textContent') {
+          dateStr = el.textContent?.trim() || null
+        } else {
+          dateStr = el.getAttribute(attr)
+        }
+        if (dateStr) {
+          // Try to parse and format the date
+          const formatted = formatPublishedDate(dateStr)
+          if (formatted) {
+            metadata.publishedAt = formatted
+            break
+          }
+        }
+      }
+    } catch { /* skip invalid selector */ }
   }
   
   // Get favicon
@@ -54,6 +132,36 @@ function extractMetadata(): Partial<ClipMetadata> {
   }
   
   return metadata
+}
+
+/**
+ * Format published date to readable format
+ * Handles ISO 8601, various date strings, Chinese date formats
+ */
+function formatPublishedDate(dateStr: string): string | null {
+  if (!dateStr) return null
+  
+  // Try parsing as ISO 8601 or standard date
+  const date = new Date(dateStr)
+  if (!isNaN(date.getTime())) {
+    return formatDateTime(date)
+  }
+  
+  // Try Chinese date patterns: 2024年1月15日, 2024-01-15
+  const chinesePattern = /(\d{4})[年\-\/](\d{1,2})[月\-\/](\d{1,2})[日]?/
+  const match = dateStr.match(chinesePattern)
+  if (match) {
+    const [, year, month, day] = match
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+  }
+  
+  // If all else fails, return cleaned original string (if reasonable length)
+  const cleaned = dateStr.trim()
+  if (cleaned.length < 50) {
+    return cleaned
+  }
+  
+  return null
 }
 
 /**
@@ -856,9 +964,9 @@ function removeDuplicateTitle(element: HTMLElement, pageTitle: string): void {
   const normalizedPageTitle = normalizeTitle(pageTitle)
   if (!normalizedPageTitle) return
   
-  // Check first H1/H2 heading
-  const headings = element.querySelectorAll('h1, h2')
-  for (const heading of Array.from(headings).slice(0, 2)) {
+  // Check ALL h1 headings first (not just first 2)
+  const h1Headings = element.querySelectorAll('h1')
+  for (const heading of Array.from(h1Headings)) {
     const headingText = normalizeTitle(heading.textContent || '')
     if (headingText && isTitleMatch(headingText, normalizedPageTitle)) {
       heading.remove()
@@ -866,17 +974,27 @@ function removeDuplicateTitle(element: HTMLElement, pageTitle: string): void {
     }
   }
   
+  // Check first few H2 headings
+  const h2Headings = element.querySelectorAll('h2')
+  for (const heading of Array.from(h2Headings).slice(0, 3)) {
+    const headingText = normalizeTitle(heading.textContent || '')
+    if (headingText && isTitleMatch(headingText, normalizedPageTitle)) {
+      heading.remove()
+      return
+    }
+  }
+  
   // Also check first prominent element (sometimes title is in div/p)
   const firstElements = element.querySelectorAll(':scope > *')
-  for (const el of Array.from(firstElements).slice(0, 3)) {
+  for (const el of Array.from(firstElements).slice(0, 5)) {
     const text = el.textContent?.trim() || ''
-    // Only consider short text that could be a title
-    if (text.length < 200 && text.length > 5) {
+    // Only consider short text that could be a title (increased limit for long titles)
+    if (text.length < 300 && text.length > 5) {
       const normalizedText = normalizeTitle(text)
       if (normalizedText && isTitleMatch(normalizedText, normalizedPageTitle)) {
         // Check if this element only contains the title (not mixed with other content)
         const innerText = el.textContent?.trim() || ''
-        if (innerText.length < 300) {
+        if (innerText.length < 400) {
           el.remove()
           return
         }

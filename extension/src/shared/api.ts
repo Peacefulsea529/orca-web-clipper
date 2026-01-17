@@ -17,25 +17,42 @@ const CLIP_DATA_PREFIX = 'ORCA_WEB_CLIP:'
 export async function checkOrcaConnection(): Promise<OrcaConnectionStatus> {
   // Check if MCP is enabled
   const mcpEnabled = await isMcpEnabled()
+  console.log('[API] checkOrcaConnection: MCP enabled:', mcpEnabled)
   
   if (mcpEnabled) {
     try {
       const client = getMcpClient()
-      await client.init()
+      const initResult = await client.init()
+      console.log('[API] checkOrcaConnection: Client init result:', initResult)
       
       // Load repoId from storage
       const repoId = await getMcpRepoId()
+      console.log('[API] checkOrcaConnection: Loaded repoId from storage:', repoId)
+      
       if (repoId) {
         client.setRepoId(repoId)
+        console.log('[API] checkOrcaConnection: Set repoId on client')
+      } else {
+        console.warn('[API] checkOrcaConnection: No repoId configured! User must set it in settings.')
       }
       
       const connected = await client.checkConnection()
+      console.log('[API] checkOrcaConnection: Connection check result:', connected)
       
       if (connected) {
         const discoveredRepoId = client.getRepoId()
+        console.log('[API] checkOrcaConnection: Final repoId:', discoveredRepoId)
+        
+        if (!discoveredRepoId) {
+          return {
+            connected: true,
+            version: 'MCP 已连接 (未配置仓库ID)',
+          }
+        }
+        
         return {
           connected: true,
-          version: `MCP Mode${discoveredRepoId ? ` (${discoveredRepoId})` : ''}`,
+          version: `MCP Mode (${discoveredRepoId})`,
         }
       }
     } catch (error) {
@@ -78,8 +95,17 @@ export async function sendClipToOrca(payload: ClipPayload): Promise<ClipResponse
  * Send clip via MCP (direct communication)
  */
 async function sendClipViaMcp(payload: ClipPayload): Promise<ClipResponse> {
+  console.log('[MCP API] sendClipViaMcp: Starting with payload:', {
+    contentLength: payload.content?.length,
+    template: payload.template,
+    target: payload.target,
+    metadata: payload.metadata,
+  })
+  
   const client = getMcpClient()
   const initialized = await client.init()
+  
+  console.log('[MCP API] sendClipViaMcp: Client initialized:', initialized)
   
   if (!initialized) {
     return {
@@ -90,16 +116,22 @@ async function sendClipViaMcp(payload: ClipPayload): Promise<ClipResponse> {
   
   // Load repoId from storage if not already set
   if (!client.getRepoId()) {
+    console.log('[MCP API] sendClipViaMcp: No repoId set, loading from storage')
     const repoId = await getMcpRepoId()
+    console.log('[MCP API] sendClipViaMcp: Loaded repoId from storage:', repoId)
     if (repoId) {
       client.setRepoId(repoId)
     } else {
       // Try to discover repoId
+      console.log('[MCP API] sendClipViaMcp: Attempting to discover repoId')
       await client.discoverRepoId()
     }
   }
   
-  if (!client.getRepoId()) {
+  const finalRepoId = client.getRepoId()
+  console.log('[MCP API] sendClipViaMcp: Final repoId:', finalRepoId)
+  
+  if (!finalRepoId) {
     return {
       success: false,
       error: 'No repoId configured or discovered',
@@ -114,6 +146,7 @@ async function sendClipViaMcp(payload: ClipPayload): Promise<ClipResponse> {
     author: payload.metadata.author || '',
     publishedAt: payload.metadata.publishedAt || '',
     capturedAt: payload.metadata.capturedAt || '',
+    abstract: payload.metadata.abstract || '',
     content: payload.content || '',
     note: payload.note || '',
     summary: payload.summary || '',
@@ -122,7 +155,19 @@ async function sendClipViaMcp(payload: ClipPayload): Promise<ClipResponse> {
   }
   
   const template = getTemplate(payload.template || 'default')
-  let content = applyTemplate(template?.content || '{{content}}', templateData)
+  console.log('[MCP API] sendClipViaMcp: Using template:', payload.template || 'default')
+  
+  if (!template) {
+    return {
+      success: false,
+      error: 'Template not found',
+    }
+  }
+  
+  const { titleLine, content, tagProperties } = applyTemplate(template, templateData)
+  console.log('[MCP API] sendClipViaMcp: TitleLine:', titleLine)
+  console.log('[MCP API] sendClipViaMcp: Content preview:', content.substring(0, 300) + (content.length > 300 ? '...' : ''))
+  console.log('[MCP API] sendClipViaMcp: Tag properties:', tagProperties)
   
   // Screenshot feature removed - MCP payload size limit makes it impractical
   
@@ -132,27 +177,39 @@ async function sendClipViaMcp(payload: ClipPayload): Promise<ClipResponse> {
     ? payload.target.pageName || payload.metadata.title 
     : undefined
   
-  console.log('[Web Clipper] Calling MCP insertContent...')
+  console.log('[MCP API] sendClipViaMcp: Calling insertContent with:', {
+    titleLineLength: titleLine.length,
+    contentLength: content.length,
+    title: payload.metadata.title,
+    url: payload.metadata.url,
+    target,
+    pageName,
+    tagProperties,
+  })
   
   const result = await client.insertContent({
+    titleLine,
     content,
     title: payload.metadata.title,
     url: payload.metadata.url,
     target,
     pageName,
+    tagProperties,
   })
   
-  console.log('[Web Clipper] MCP result:', result)
+  console.log('[MCP API] sendClipViaMcp: insertContent result:', result)
   
   if (result.success) {
     // Tags are already added in the template content (e.g., "# {{title}} #WebClip #Article")
     // No need to call batchInsertTags separately
+    console.log('[MCP API] sendClipViaMcp: Success! blockId:', result.blockId)
     return {
       success: true,
       blockId: result.blockId,
     }
   }
   
+  console.error('[MCP API] sendClipViaMcp: Failed:', result.error)
   return {
     success: false,
     error: result.error || 'MCP insert failed',

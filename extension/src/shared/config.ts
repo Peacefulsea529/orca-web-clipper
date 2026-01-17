@@ -30,6 +30,7 @@ export const CONFIG = {
     AUTH_TOKEN: 'orca_auth_token',
     DEFAULT_TARGET: 'default_target',
     DEFAULT_MODE: 'default_mode',
+    DEFAULT_TEMPLATE: 'default_template',
     SERVER_PORT: 'serverPort',
     MCP_TOKEN: 'orca_mcp_token',
     MCP_REPO_ID: 'orca_mcp_repo_id',
@@ -49,7 +50,7 @@ export const CONFIG = {
   // Timeouts
   REQUEST_TIMEOUT: 10000, // 10 seconds
   HEALTH_CHECK_TIMEOUT: 3000, // 3 seconds
-  MCP_TIMEOUT: 15000, // 15 seconds for MCP operations
+  MCP_TIMEOUT: 30000, // 30 seconds for MCP operations (increased from 15s)
   AI_TIMEOUT: 60000, // 60 seconds for AI operations
 }
 
@@ -123,8 +124,11 @@ export async function isMcpEnabled(): Promise<boolean> {
 export async function getMcpRepoId(): Promise<string | null> {
   try {
     const storage = await chrome.storage.local.get(CONFIG.STORAGE_KEYS.MCP_REPO_ID)
-    return storage[CONFIG.STORAGE_KEYS.MCP_REPO_ID] || null
-  } catch {
+    const repoId = storage[CONFIG.STORAGE_KEYS.MCP_REPO_ID] || null
+    console.log('[Config] getMcpRepoId: storage key =', CONFIG.STORAGE_KEYS.MCP_REPO_ID, ', value =', repoId)
+    return repoId
+  } catch (error) {
+    console.error('[Config] getMcpRepoId: Error reading storage:', error)
     return null
   }
 }

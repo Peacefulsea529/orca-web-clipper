@@ -10,6 +10,7 @@ export interface ClipMetadata {
   publishedAt?: string
   capturedAt: string
   favicon?: string
+  abstract?: string // AI-generated brief description (100 chars max)
 }
 
 export interface ClipPayload {

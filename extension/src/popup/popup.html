@@ -79,7 +79,7 @@
       <section class="clip-options">
         <label class="option-label">模板</label>
         <select id="template-select" class="select">
-          <option value="default">默认</option>
+          <option value="default">通用</option>
           <option value="article">文章</option>
           <option value="bookmark">书签</option>
           <option value="research">研究笔记</option>
@@ -128,10 +128,10 @@
           <input type="password" id="mcp-token" class="input" placeholder="从 Orca 设置中复制...">
         </div>
         <div class="setting-row">
-          <span>仓库 ID</span>
-          <input type="text" id="mcp-repo-id" class="input" placeholder="default (留空自动发现)">
+          <span>仓库 ID (必填)</span>
+          <input type="text" id="mcp-repo-id" class="input" placeholder="在 Orca URL 中获取，如 r70433xguevfg">
         </div>
-        <p class="setting-hint">在 Orca 设置 → 开发者 → MCP Server 中获取 Token</p>
+        <p class="setting-hint">在 Orca 设置 → 开发者 → MCP Server 中获取 Token；仓库 ID 在 Orca 网页版 URL 中（如 orca.sea.art/r70433xguevfg）</p>
       </section>
       
       <!-- Legacy Settings -->
@@ -206,6 +206,15 @@
           <select id="default-target" class="select-small">
             <option value="journal">今日日记</option>
             <option value="new-page">新页面</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <span>默认模板</span>
+          <select id="default-template" class="select-small">
+            <option value="default">通用</option>
+            <option value="article">文章</option>
+            <option value="bookmark">书签</option>
+            <option value="research">研究笔记</option>
           </select>
         </div>
       </section>

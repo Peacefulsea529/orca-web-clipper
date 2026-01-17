@@ -57,6 +57,17 @@ Rules:
 4. Use the same language as the original content
 5. Format as a simple bullet list with "-"
 6. Be direct and specific, avoid vague statements`,
+
+  abstract: `You are a content summarizer. Create a brief one-sentence description of the article.
+
+Rules:
+1. Output a SINGLE sentence, maximum 100 characters
+2. Capture the core topic/theme of the article
+3. Use the same language as the original content
+4. No bullet points, no line breaks, just one sentence
+5. Be direct and informative
+6. Do NOT include phrases like "This article discusses..." or "The author..."
+7. If content is in Chinese, output in Chinese`,
 }
 
 /**
@@ -431,6 +442,62 @@ export async function testAIConnection(config: AIModelConfig): Promise<{ success
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Connection test failed',
+    }
+  }
+}
+
+/**
+ * Generate a brief abstract (100 characters max) for the article
+ * Used for the {{abstract}} template variable
+ */
+export async function generateAbstract(
+  content: string,
+  title: string,
+  modelConfig: AIModelConfig
+): Promise<AICleaningResponse> {
+  try {
+    // Use markdown content instead of HTML for efficiency
+    // Truncate if too long
+    const maxLength = 10000
+    let text = content
+    if (text.length > maxLength) {
+      text = text.substring(0, maxLength)
+    }
+
+    const userPrompt = `Title: ${title}
+
+Content:
+${text}
+
+Please provide a brief one-sentence description (max 100 characters) of this article.`
+
+    const response = await callAIProvider(
+      modelConfig,
+      SYSTEM_PROMPTS.abstract,
+      userPrompt
+    )
+
+    // Ensure the abstract is within 100 characters
+    if (response.success && response.content) {
+      let abstract = response.content.trim()
+      // Remove any quotes if the AI wrapped it
+      abstract = abstract.replace(/^["']|["']$/g, '').trim()
+      // Truncate if still too long
+      if (abstract.length > 100) {
+        abstract = abstract.substring(0, 97) + '...'
+      }
+      return {
+        success: true,
+        content: abstract,
+        tokensUsed: response.tokensUsed,
+      }
+    }
+
+    return response
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Abstract generation failed',
     }
   }
 }

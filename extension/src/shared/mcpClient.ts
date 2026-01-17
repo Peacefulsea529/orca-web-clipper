@@ -169,32 +169,46 @@ export class OrcaMcpClient {
    */
   async getTodayJournal(): Promise<{ blockId: number; success: boolean; error?: string }> {
     if (!this.repoId) {
+      console.error('[MCP] getTodayJournal: No repoId configured')
       return { blockId: 0, success: false, error: 'No repoId configured' }
     }
 
     try {
+      console.log('[MCP] getTodayJournal: Calling with repoId:', this.repoId)
       const result = await this.callTool('get_today_journal', { repoId: this.repoId })
+      console.log('[MCP] getTodayJournal: Raw result:', JSON.stringify(result))
+      
       const textContent = result.content.find(c => c.type === 'text')
       
       if (textContent?.text) {
+        console.log('[MCP] getTodayJournal: Text content:', textContent.text)
         try {
           const parsed = JSON.parse(textContent.text)
+          console.log('[MCP] getTodayJournal: Parsed JSON:', parsed)
+          const blockId = parsed.blockId || parsed.block_id || parsed.id
+          console.log('[MCP] getTodayJournal: Extracted blockId:', blockId)
           return {
             success: true,
-            blockId: parsed.blockId || parsed.block_id || parsed.id,
+            blockId,
           }
         } catch {
           // Try to extract blockId from text
+          console.log('[MCP] getTodayJournal: JSON parse failed, trying regex')
           const match = textContent.text.match(/\d+/)
           if (match) {
-            return { success: true, blockId: parseInt(match[0], 10) }
+            const blockId = parseInt(match[0], 10)
+            console.log('[MCP] getTodayJournal: Extracted blockId via regex:', blockId)
+            return { success: true, blockId }
           }
+          console.error('[MCP] getTodayJournal: Could not parse blockId from:', textContent.text)
           return { success: false, blockId: 0, error: 'Could not parse journal blockId' }
         }
       }
 
+      console.error('[MCP] getTodayJournal: No text content in result')
       return { success: false, blockId: 0, error: 'No journal data returned' }
     } catch (error) {
+      console.error('[MCP] getTodayJournal: Exception:', error)
       return {
         success: false,
         blockId: 0,
@@ -212,33 +226,60 @@ export class OrcaMcpClient {
     text: string
   }): Promise<{ success: boolean; blockId?: number; error?: string }> {
     if (!this.repoId) {
+      console.error('[MCP] insertMarkdown: No repoId configured')
       return { success: false, error: 'No repoId configured' }
     }
 
     try {
+      console.log('[MCP] insertMarkdown: Calling with params:', {
+        repoId: this.repoId,
+        refBlockId: params.refBlockId,
+        textLength: params.text.length,
+        textPreview: params.text.substring(0, 200) + (params.text.length > 200 ? '...' : ''),
+      })
+      
       const result = await this.callTool('insert_markdown', {
         repoId: this.repoId,
         refBlockId: params.refBlockId,
         text: params.text,
       })
 
+      console.log('[MCP] insertMarkdown: Raw result:', JSON.stringify(result))
+      console.log('[MCP] insertMarkdown: isError =', result.isError)
+
       // Try to parse blockId from result
       const textContent = result.content.find(c => c.type === 'text')
+      console.log('[MCP] insertMarkdown: textContent:', textContent?.text)
+      
       if (textContent?.text) {
         try {
           const parsed = JSON.parse(textContent.text)
+          console.log('[MCP] insertMarkdown: Parsed JSON:', parsed)
           // Handle various response formats
           const blockId = parsed.blockId || parsed.block_id || parsed.id ||
             (Array.isArray(parsed.blockIds) ? parsed.blockIds[0] : undefined) ||
             (Array.isArray(parsed.block_ids) ? parsed.block_ids[0] : undefined)
-          return { success: !result.isError, blockId }
-        } catch {
+          console.log('[MCP] insertMarkdown: Extracted blockId:', blockId)
+          const finalResult = { success: !result.isError, blockId }
+          console.log('[MCP] insertMarkdown: Returning:', finalResult)
+          return finalResult
+        } catch (parseError) {
           // JSON parse failed, continue without blockId
+          console.log('[MCP] insertMarkdown: JSON parse failed, text is not JSON:', parseError)
+          // Check if text contains success indicators
+          const text = textContent.text.toLowerCase()
+          if (text.includes('success') || text.includes('inserted') || text.includes('created')) {
+            console.log('[MCP] insertMarkdown: Text indicates success')
+            return { success: true }
+          }
         }
       }
 
-      return { success: !result.isError }
+      const finalResult = { success: !result.isError }
+      console.log('[MCP] insertMarkdown: Returning (no blockId):', finalResult)
+      return finalResult
     } catch (error) {
+      console.error('[MCP] insertMarkdown: Exception:', error)
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -355,26 +396,104 @@ export class OrcaMcpClient {
   }
 
   /**
+   * Query blocks by text content
+   * Used to find recently inserted blocks
+   */
+  async queryBlocksByText(text: string): Promise<{ blocks: Array<{ id: number; text: string }>; success: boolean; error?: string }> {
+    if (!this.repoId) {
+      return { blocks: [], success: false, error: 'No repoId configured' }
+    }
+
+    try {
+      // Build query: search for blocks containing the text
+      const query: Record<string, unknown> = {
+        _: true,
+        q: {
+          kind: 100, // SELF_AND
+          conditions: [
+            { kind: 8, text: text.substring(0, 50) } // Text query, use first 50 chars
+          ]
+        },
+        sort: [['_modified', 'DESC']],
+        pageSize: 10
+      }
+
+      const result = await this.callTool('query_blocks', {
+        repoId: this.repoId,
+        description: query,
+      })
+
+      const textContent = result.content.find(c => c.type === 'text')
+      if (textContent?.text) {
+        console.log('[MCP] queryBlocksByText: Raw response text:', textContent.text)
+        
+        // Try JSON parse first
+        try {
+          const parsed = JSON.parse(textContent.text)
+          // Extract block info from query result
+          const blocks = Array.isArray(parsed) 
+            ? parsed.map((b: { id: number; text?: string }) => ({ id: b.id, text: b.text || '' }))
+            : []
+          return { success: true, blocks }
+        } catch {
+          // JSON parse failed, try to extract Block IDs from text format
+          // Format: "Block IDs:\n4358" or "Block IDs:\n4358\n4359"
+          const blockIdsMatch = textContent.text.match(/Block IDs:\s*([\d\s\n]+)/i)
+          if (blockIdsMatch) {
+            const idsText = blockIdsMatch[1].trim()
+            const ids = idsText.split(/[\s\n]+/).map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
+            console.log('[MCP] queryBlocksByText: Extracted block IDs from text:', ids)
+            const blocks = ids.map(id => ({ id, text: '' }))
+            return { success: true, blocks }
+          }
+          console.log('[MCP] queryBlocksByText: Could not parse response')
+          return { success: true, blocks: [] }
+        }
+      }
+
+      return { success: !result.isError, blocks: [] }
+    } catch (error) {
+      return {
+        blocks: [],
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      }
+    }
+  }
+
+  /**
    * Insert content into Orca (for web clipping)
    * This is the main entry point for clipping
-   * Note: content should already be formatted with template (including title, url, etc.)
+   * Two-step insertion: titleLine as parent, content as children
+   * Tag properties (source, clipped) are inserted as property blocks (propName:: value)
    */
   async insertContent(params: {
+    titleLine: string
     content: string
     title?: string
     url?: string
     target?: 'journal' | 'page'
     pageName?: string
+    tagProperties?: Record<string, string>
   }): Promise<{ blockId?: number; success: boolean; error?: string }> {
-    // Content is already formatted by template, use directly
-    const markdown = params.content
+    console.log('[MCP] insertContent: Called with params:', {
+      titleLineLength: params.titleLine.length,
+      contentLength: params.content.length,
+      title: params.title,
+      url: params.url,
+      target: params.target,
+      pageName: params.pageName,
+      tagProperties: params.tagProperties,
+    })
 
     try {
       let targetBlockId: number
 
       if (params.target === 'page' && params.pageName) {
+        console.log('[MCP] insertContent: Target is page, searching for:', params.pageName)
         // First, search if the page already exists
         const searchResult = await this.searchPages([params.pageName])
+        console.log('[MCP] insertContent: Search result:', searchResult)
         
         if (searchResult.success && searchResult.pages.length > 0) {
           // Find exact match (case-insensitive)
@@ -384,10 +503,13 @@ export class OrcaMcpClient {
           
           if (exactMatch) {
             // Page exists, use it
+            console.log('[MCP] insertContent: Found existing page:', exactMatch)
             targetBlockId = exactMatch.id
           } else {
             // No exact match, create new page
+            console.log('[MCP] insertContent: No exact match, creating new page')
             const pageResult = await this.createPage(params.pageName)
+            console.log('[MCP] insertContent: Create page result:', pageResult)
             if (!pageResult.success || !pageResult.blockId) {
               return { success: false, error: pageResult.error || 'Failed to create page' }
             }
@@ -395,7 +517,9 @@ export class OrcaMcpClient {
           }
         } else {
           // Search failed or no results, create new page
+          console.log('[MCP] insertContent: Search failed or empty, creating new page')
           const pageResult = await this.createPage(params.pageName)
+          console.log('[MCP] insertContent: Create page result:', pageResult)
           if (!pageResult.success || !pageResult.blockId) {
             return { success: false, error: pageResult.error || 'Failed to create page' }
           }
@@ -403,25 +527,82 @@ export class OrcaMcpClient {
         }
       } else {
         // Default: insert into today's journal
+        console.log('[MCP] insertContent: Target is journal, getting today journal')
         const journalResult = await this.getTodayJournal()
+        console.log('[MCP] insertContent: Journal result:', journalResult)
         if (!journalResult.success || !journalResult.blockId) {
+          console.error('[MCP] insertContent: Failed to get journal:', journalResult.error)
           return { success: false, error: journalResult.error || 'Failed to get today\'s journal' }
         }
         targetBlockId = journalResult.blockId
       }
 
-      // Insert the markdown content
-      const insertResult = await this.insertMarkdown({
+      console.log('[MCP] insertContent: Target blockId:', targetBlockId)
+      
+      // Step 1: Insert title line
+      console.log('[MCP] insertContent: Step 1 - Inserting title line:', params.titleLine)
+      const titleResult = await this.insertMarkdown({
         refBlockId: targetBlockId,
-        text: markdown,
+        text: params.titleLine,
       })
 
-      return {
-        success: insertResult.success,
-        blockId: targetBlockId,
-        error: insertResult.error,
+      if (!titleResult.success) {
+        console.error('[MCP] insertContent: Failed to insert title:', titleResult.error)
+        return { success: false, error: titleResult.error || 'Failed to insert title' }
+      }
+      console.log('[MCP] insertContent: Title inserted successfully')
+
+      // Step 2: Query to find the just-inserted title block
+      console.log('[MCP] insertContent: Step 2 - Querying for title block...')
+      
+      // Small delay to ensure the block is indexed
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      const queryResult = await this.queryBlocksByText(params.titleLine)
+      console.log('[MCP] insertContent: Query result:', queryResult)
+
+      let titleBlockId: number | undefined
+      if (queryResult.success && queryResult.blocks.length > 0) {
+        // Find the block that matches our title (should be the most recent)
+        const matchingBlock = queryResult.blocks.find(b => 
+          b.text && b.text.includes(params.titleLine.substring(0, 30))
+        )
+        titleBlockId = matchingBlock?.id || queryResult.blocks[0].id
+        console.log('[MCP] insertContent: Found title block ID:', titleBlockId)
+      }
+
+      // Step 3: Insert content as children of the title block
+      if (titleBlockId) {
+        console.log('[MCP] insertContent: Step 3 - Inserting content as children of block:', titleBlockId)
+        
+        const contentResult = await this.insertMarkdown({
+          refBlockId: titleBlockId,
+          text: params.content,
+        })
+        console.log('[MCP] insertContent: Content insert result:', contentResult)
+        
+        return {
+          success: contentResult.success,
+          blockId: titleBlockId,
+          error: contentResult.error,
+        }
+      } else {
+        // Fallback: insert content at same level as title
+        console.warn('[MCP] insertContent: Could not find title block, inserting content at same level')
+        
+        const contentResult = await this.insertMarkdown({
+          refBlockId: targetBlockId,
+          text: params.content,
+        })
+        
+        return {
+          success: contentResult.success,
+          blockId: targetBlockId,
+          error: contentResult.error,
+        }
       }
     } catch (error) {
+      console.error('[MCP] insertContent: Exception:', error)
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -444,10 +625,14 @@ export class OrcaMcpClient {
       params,
     }
 
+    console.log('[MCP] sendRequest: method =', method, ', params =', JSON.stringify(params).substring(0, 200))
+    console.log('[MCP] sendRequest: endpoint =', this.endpointUrl)
+    
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), CONFIG.MCP_TIMEOUT)
 
     try {
+      const startTime = Date.now()
       const response = await fetch(this.endpointUrl, {
         method: 'POST',
         headers: {
@@ -460,19 +645,26 @@ export class OrcaMcpClient {
       })
 
       clearTimeout(timeoutId)
+      const elapsed = Date.now() - startTime
+      console.log('[MCP] sendRequest: Response received in', elapsed, 'ms, status =', response.status)
 
       if (!response.ok) {
+        const errorText = await response.text()
+        console.error('[MCP] sendRequest: HTTP error response:', errorText.substring(0, 500))
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
       // Handle SSE response format from streamable-http
       const responseText = await response.text()
+      console.log('[MCP] sendRequest: Response text:', responseText.substring(0, 500))
       return this.parseSSEResponse(responseText)
     } catch (error) {
       clearTimeout(timeoutId)
       if (error instanceof Error && error.name === 'AbortError') {
+        console.error('[MCP] sendRequest: Request timed out after', CONFIG.MCP_TIMEOUT, 'ms')
         throw new Error('MCP request timeout')
       }
+      console.error('[MCP] sendRequest: Request failed:', error)
       throw error
     }
   }

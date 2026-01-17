@@ -48,6 +48,11 @@ const aiCustomUrlRow = document.getElementById('ai-custom-url-row') as HTMLEleme
 const aiCleaningModeSelect = document.getElementById('ai-cleaning-mode') as HTMLSelectElement
 const testAIBtn = document.getElementById('test-ai-btn') as HTMLButtonElement
 
+// Default settings elements
+const defaultModeSelect = document.getElementById('default-mode') as HTMLSelectElement
+const defaultTargetSelect = document.getElementById('default-target') as HTMLSelectElement
+const defaultTemplateSelect = document.getElementById('default-template') as HTMLSelectElement
+
 // State
 let currentMode: ClipMode = 'article'
 let currentTarget: ClipTarget = { type: 'journal' }
@@ -171,6 +176,12 @@ function setupEventListeners(): void {
     })
   }
   
+  if (aiCleaningModeSelect) {
+    aiCleaningModeSelect.addEventListener('change', () => {
+      updateTranslateLanguageVisibility()
+    })
+  }
+  
   if (useAICleaningCheckbox) {
     useAICleaningCheckbox.addEventListener('change', () => {
       useAICleaning = useAICleaningCheckbox.checked
@@ -257,6 +268,26 @@ async function handleClip(): Promise<void> {
       }
     }
     
+    // Generate abstract (100 chars max) if AI is configured
+    let abstract: string | undefined
+    try {
+      const aiConfig = await getAIModelConfigFromStorage()
+      if (aiConfig) {
+        showStatus('📝 生成摘要描述...', 'success')
+        const { generateAbstract } = await import('../shared/aiCleaner')
+        const abstractResult = await generateAbstract(
+          content,
+          tab.title || '',
+          aiConfig
+        )
+        if (abstractResult.success && abstractResult.content) {
+          abstract = abstractResult.content
+        }
+      }
+    } catch (abstractError) {
+      console.warn('Abstract generation failed:', abstractError)
+    }
+    
     // Build payload
     const now = new Date()
     const capturedAt = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
@@ -272,6 +303,7 @@ async function handleClip(): Promise<void> {
         title: tab.title || '',
         ...extracted.metadata,
         capturedAt, // Must be after spread to override
+        abstract, // AI-generated abstract (100 chars max)
       },
       content, // Use AI-cleaned or rule-based content
       mode: currentMode,
@@ -298,7 +330,8 @@ async function handleClip(): Promise<void> {
       } else {
         showStatus('✓ 已复制到剪贴板！请在 Orca 中按 Ctrl+Shift+V', 'success')
       }
-      setTimeout(() => window.close(), 2500)
+      // Auto-close disabled for debugging - uncomment when ready for production
+      // setTimeout(() => window.close(), 2500)
     } else {
       throw new Error(clipResponse.error || '保存失败')
     }
@@ -316,6 +349,7 @@ async function loadSettings(): Promise<void> {
   const storage = await chrome.storage.local.get([
     CONFIG.STORAGE_KEYS.DEFAULT_MODE,
     CONFIG.STORAGE_KEYS.DEFAULT_TARGET,
+    CONFIG.STORAGE_KEYS.DEFAULT_TEMPLATE,
     CONFIG.STORAGE_KEYS.USE_MCP,
     CONFIG.STORAGE_KEYS.MCP_TOKEN,
     CONFIG.STORAGE_KEYS.MCP_REPO_ID,
@@ -329,6 +363,39 @@ async function loadSettings(): Promise<void> {
     CONFIG.STORAGE_KEYS.AI_BASE_URL,
     CONFIG.STORAGE_KEYS.AI_CLEANING_MODE,
   ])
+  
+  // Default settings
+  if (defaultModeSelect && storage[CONFIG.STORAGE_KEYS.DEFAULT_MODE]) {
+    defaultModeSelect.value = storage[CONFIG.STORAGE_KEYS.DEFAULT_MODE]
+    currentMode = storage[CONFIG.STORAGE_KEYS.DEFAULT_MODE] as ClipMode
+    // Update mode button UI
+    modeBtns.forEach(btn => {
+      const mode = btn.getAttribute('data-mode')
+      btn.classList.toggle('active', mode === currentMode)
+    })
+  }
+  if (defaultTargetSelect && storage[CONFIG.STORAGE_KEYS.DEFAULT_TARGET]) {
+    defaultTargetSelect.value = storage[CONFIG.STORAGE_KEYS.DEFAULT_TARGET]
+    const targetType = storage[CONFIG.STORAGE_KEYS.DEFAULT_TARGET] === 'new-page' ? 'page' : 'journal'
+    currentTarget = { type: targetType }
+    // Update target button UI
+    targetBtns.forEach(btn => {
+      const target = btn.getAttribute('data-target')
+      btn.classList.toggle('active', target === targetType)
+    })
+    // Show/hide page name section
+    if (pageNameSection) {
+      pageNameSection.style.display = targetType === 'page' ? 'block' : 'none'
+    }
+  }
+  if (defaultTemplateSelect && storage[CONFIG.STORAGE_KEYS.DEFAULT_TEMPLATE]) {
+    defaultTemplateSelect.value = storage[CONFIG.STORAGE_KEYS.DEFAULT_TEMPLATE]
+    currentTemplate = storage[CONFIG.STORAGE_KEYS.DEFAULT_TEMPLATE]
+    // Update template select in clip tab
+    if (templateSelect) {
+      templateSelect.value = currentTemplate
+    }
+  }
   
   // MCP settings
   if (useMcpCheckbox) {
@@ -377,6 +444,17 @@ async function loadSettings(): Promise<void> {
 async function saveSettings(): Promise<void> {
   const settings: Record<string, unknown> = {}
   
+  // Default settings
+  if (defaultModeSelect) {
+    settings[CONFIG.STORAGE_KEYS.DEFAULT_MODE] = defaultModeSelect.value
+  }
+  if (defaultTargetSelect) {
+    settings[CONFIG.STORAGE_KEYS.DEFAULT_TARGET] = defaultTargetSelect.value
+  }
+  if (defaultTemplateSelect) {
+    settings[CONFIG.STORAGE_KEYS.DEFAULT_TEMPLATE] = defaultTemplateSelect.value
+  }
+  
   // MCP settings
   if (useMcpCheckbox) {
     settings[CONFIG.STORAGE_KEYS.USE_MCP] = useMcpCheckbox.checked
@@ -384,8 +462,11 @@ async function saveSettings(): Promise<void> {
   if (mcpTokenInput && mcpTokenInput.value) {
     settings[CONFIG.STORAGE_KEYS.MCP_TOKEN] = mcpTokenInput.value.trim()
   }
-  if (mcpRepoIdInput && mcpRepoIdInput.value) {
-    settings[CONFIG.STORAGE_KEYS.MCP_REPO_ID] = mcpRepoIdInput.value.trim()
+  if (mcpRepoIdInput) {
+    // Always save repoId, even if empty (to allow clearing)
+    const repoIdValue = mcpRepoIdInput.value.trim()
+    settings[CONFIG.STORAGE_KEYS.MCP_REPO_ID] = repoIdValue
+    console.log('[Settings] Saving repoId:', repoIdValue, 'key:', CONFIG.STORAGE_KEYS.MCP_REPO_ID)
   }
   
   // Legacy settings
@@ -417,7 +498,9 @@ async function saveSettings(): Promise<void> {
     settings[CONFIG.STORAGE_KEYS.AI_CLEANING_MODE] = aiCleaningModeSelect.value
   }
   
+  console.log('[Settings] Saving all settings:', Object.keys(settings))
   await chrome.storage.local.set(settings)
+  console.log('[Settings] Settings saved successfully')
   showStatus('设置已保存', 'success')
   
   // Re-check connection and update AI visibility
